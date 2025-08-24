@@ -6,6 +6,7 @@ import simsopt.mhd
 import simsopt.geo
 import subprocess
 import os
+import shutil
 
 if IPython.get_ipython() is None:
     if os.path.dirname(__file__) == os.getcwd():
@@ -37,12 +38,12 @@ class Memoization:
     def __call__(self, *args):
         if not args in self.dict:
             self.dict[args] = self.f(*args)
-        print("kinfty_at", *args, "=", self.dict[args])
+        print("  kinfty_at", *args, "=", self.dict[args])
         return self.dict[args]
 
 @memory.cache(ignore=["lcfs"])
-def find_regcoil_distance(lcfs, idx=None, target_k = 17.16e6):
-    """Find the distance the coil surface must be separated from the plasma, to fulfill
+def find_regcoil_distance(lcfs:simsopt.geo.SurfaceRZFourier, idx=None, target_k = 17.16e6):
+    r"""Find the distance the coil surface must be separated from the plasma, to fulfill
     |K|_\infty = 17.16 MA/m
     The optimization is bounded, the surface offset is ]0, 0.5["""
 
@@ -96,13 +97,13 @@ def find_regcoil_distance(lcfs, idx=None, target_k = 17.16e6):
 
 
 def run_regcoil_fixed_dist(plasma_surface: simsopt.geo.Surface|simsopt.mhd.Vmec, distance: float, 
-    surface_resolution = 128,fourier_resolution = 14):
+    surface_resolution = 96, fourier_resolution = 16):
     plasma_path = PLASMA_PATH
     if isinstance(plasma_surface, simsopt.geo.SurfaceRZFourier):
         bdistrib_io.write_netcdf(PLASMA_PATH, plasma_surface.to_RZFourier())
-    elif(isinstance(plasma_surface, simsopt.mhd.Vmec)): 
+    else:
         plasma_surface.run()
-        plasma_path = plasma_surface.output_file
+        shutil.copy(plasma_surface.output_file, PLASMA_PATH)
     cwd = os.path.dirname(REGCOIL_IN_TMP_PATH)
 
     input_string = f"""&regcoil_nml
@@ -128,8 +129,13 @@ def run_regcoil_fixed_dist(plasma_surface: simsopt.geo.Surface|simsopt.mhd.Vmec,
   symmetry_option = 3
 /
 """
+    print("   Running regcoil with input:",REGCOIL_IN_TMP_PATH, plasma_path )
     with open(REGCOIL_IN_TMP_PATH, "w") as f:
         f.write(input_string)
-    return subprocess.check_output(
-        ["regcoil", os.path.basename(REGCOIL_IN_TMP_PATH)], cwd=tmpdir
-    )
+    try:
+        return subprocess.check_output(
+            ["regcoil", os.path.basename(REGCOIL_IN_TMP_PATH)], cwd=tmpdir
+        )
+    except subprocess.CalledProcessError as e:
+        print("Regcoil failed with error code", e.returncode)
+        return " it is too low.".encode()
